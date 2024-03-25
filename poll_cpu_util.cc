@@ -26,11 +26,11 @@ static clock_t lastCPU, lastSysCPU, lastUserCPU;
 static int numProcessors;
 high_resolution_clock::time_point global_start;
 
-#define NUMITERS 500 // 100
-#define NUM_5_MS_SLA 1
-#define NUM_50_MS_SLA 1
+#define NUM_ITERS 400
+#define NUM_5_MS_SLA 0
+#define NUM_50_MS_SLA 0
 #define NUM_500_MS_SLA 1
-#define UTIL_CHECK_SLEEP_TIME_MILLISEC 5
+#define MOVE_PROC_WAIT_TIME_MS 1
 #define TO_FACTOR_500 87465353
 #define TO_FACTOR_50 87465352
 #define TO_FACTOR_5 87465351
@@ -40,45 +40,34 @@ double timeDiff() {
     return 1000 * time_span.count();  // 1000 => shows millisec; 1000000 => shows microsec
 }
 
-std::vector<size_t> get_cpu_times() {
-    std::ifstream proc_stat("/proc/stat");
-    proc_stat.ignore(5, ' '); // Skip the 'cpu' prefix.
-    std::vector<size_t> times;
-    for (size_t time; proc_stat >> time; times.push_back(time));
-    return times;
-}
 
-bool get_cpu_times(size_t &idle_time, size_t &total_time) {
-    const std::vector<size_t> cpu_times = get_cpu_times();
-    if (cpu_times.size() < 4)
-        return false;
-    idle_time = cpu_times[3];
-    total_time = std::accumulate(cpu_times.begin(), cpu_times.end(), 0);
-    return true;
-}
-
-void readCPU() {
-
-    size_t previous_idle_time=0, previous_total_time=0;
-    int i = 0;
-    for (size_t idle_time, total_time; get_cpu_times(idle_time, total_time); std::this_thread::sleep_for(chrono::milliseconds(UTIL_CHECK_SLEEP_TIME_MILLISEC))) {
-        if(i > NUMITERS) {
-            return;
+void move_proc_btw_cgroups(pid_t to_move, int fd_1, int fd_2) {
+    for (int i = 0; i < NUM_ITERS; i++) {
+        int fd_to_use;
+        if (i % 2 == 0) {
+            fd_to_use = fd_1;
+        } else {
+            fd_to_use = fd_2;
         }
-        const float idle_time_delta = idle_time - previous_idle_time;
-        const float total_time_delta = total_time - previous_total_time;
-        const float utilization = 100.0 * (1.0 - idle_time_delta / total_time_delta);
-
-        ofstream file;
-        file.open("../polling_info.txt", ios::app);
-        file << timeDiff() << ", " << utilization << endl;
-        file.close();
-
-        previous_idle_time = idle_time;
-        previous_total_time = total_time;
-        i++;
+        string to_write = to_string(to_move) + "\n";
+        size_t nb = write(fd_to_use, to_write.c_str(), to_write.size());
+        if (nb == -1) {
+            perror("Error writing");
+        }
+        if (fd_to_use == fd_1) {
+            ifstream f1("/sys/fs/cgroup/test-cg-1/cgroup.procs");
+            if (f1.is_open()) {
+                cout << "1 procs file: " << f1.rdbuf();
+            }
+        } else {
+            ifstream f2("/sys/fs/cgroup/test-cg-2/cgroup.procs");
+            if (f2.is_open()) {
+                cout << "2 procs file: " << f2.rdbuf();
+            }
+        }
+        
+        std::this_thread::sleep_for(chrono::milliseconds(MOVE_PROC_WAIT_TIME_MS));
     }
-
 }
 
 // The function we want to execute on each thread.
@@ -157,16 +146,12 @@ int main() {
 
     emptyFiles();
 
-    int fd_500 = open("/sys/fs/cgroup/three-digit-ms/cgroup.procs", O_RDWR | O_APPEND);
-    if(fd_500 == -1) {
+    int fd_1 = open("/sys/fs/cgroup/test-cg-1/cgroup.procs", O_RDWR | O_APPEND);
+    if(fd_1 == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
-    int fd_50 = open("/sys/fs/cgroup/two-digit-ms/cgroup.procs", O_RDWR | O_APPEND);
-    if(fd_50 == -1) {
-        cout << "open failed: " << strerror(errno) << endl;
-    }
-    int fd_5 = open("/sys/fs/cgroup/single-digit-ms/cgroup.procs", O_RDWR | O_APPEND);
-    if(fd_5 == -1) {
+    int fd_2 = open("/sys/fs/cgroup/test-cg-2/cgroup.procs", O_RDWR | O_APPEND);
+    if(fd_2 == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
 
@@ -186,24 +171,14 @@ int main() {
 
         int fd_to_use;
         int type;
-        // if (i < NUM_500_MS_SLA) {
-        //     fd_to_use = fd_500;
-        //     type = 500;
-        // } else if (i < (NUM_500_MS_SLA + NUM_50_MS_SLA)) {
-        //     fd_to_use = fd_50;
-        //     type = 50;
-        // } else {
-        //     fd_to_use = fd_5;
-        //     type = 5;
-        // }
         if (i < NUM_5_MS_SLA) {
-            fd_to_use = fd_5;
+            fd_to_use = fd_1;
             type = 5;
         } else if (i < (NUM_5_MS_SLA + NUM_50_MS_SLA)) {
-            fd_to_use = fd_50;
+            fd_to_use = fd_2;
             type = 50;
         } else {
-            fd_to_use = fd_500;
+            fd_to_use = fd_2;
             type = 500;
         }
 
@@ -245,32 +220,14 @@ int main() {
         }   
     }
     if (is_parent) {
-        close(fd_500);
-        close(fd_50);
-        close(fd_5);
-
-        ifstream f500("/sys/fs/cgroup/three-digit-ms/cgroup.procs");
-        if (f500.is_open()) {
-            cout << "pid " << getpid() << ": 500 procs file: " << f500.rdbuf();
-        } else {
-            cout << "500 file not open?" << endl;
-        }
-        ifstream f50("/sys/fs/cgroup/two-digit-ms/cgroup.procs");
-        if (f50.is_open()) {
-            cout << "pid " << getpid() << ": 50 procs file: " << f50.rdbuf();
-        } else {
-            cout << "50 file not open?" << endl;
-        }
-        ifstream f5("/sys/fs/cgroup/single-digit-ms/cgroup.procs");
-        if (f5.is_open()) {
-            cout << "pid " << getpid() << ": 5 procs file: " << f5.rdbuf();
-        } else {
-            cout << "5 file not open?" << endl;
-        }
+        // now start moving procs between cgroups
+        move_proc_btw_cgroups(procs[0], fd_1, fd_2);
 
         for(auto& c_pid : procs){ 
             waitpid(c_pid, NULL, 0);
         }
+        close(fd_1);
+        close(fd_2);
     }
 }
 
