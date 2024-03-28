@@ -22,6 +22,14 @@
 using namespace std;
 using namespace std::chrono;
 
+// OG vals: 
+// echo 3000000 | sudo tee /sys/kernel/debug/sched/min_granularity_ns
+// echo 4000000 | sudo tee /sys/kernel/debug/sched/wakeup_granularity_ns
+
+// curr vals
+// echo 100000 | sudo tee /sys/kernel/debug/sched/min_granularity_ns
+// echo 100000 | sudo tee /sys/kernel/debug/sched/wakeup_granularity_ns
+
 high_resolution_clock::time_point global_start;
 
 #define NUM_5_MS_SLA 1
@@ -33,7 +41,7 @@ high_resolution_clock::time_point global_start;
 
 double timeDiff() {
     duration<double> time_span = duration_cast<duration<double>>(high_resolution_clock::now() - global_start);
-    return 1000 * time_span.count();  // 1000 => shows millisec; 1000000 => shows microsec
+    return 1000000 * time_span.count();  // 1000 => shows millisec; 1000000 => shows microsec
 }
 
 void readValFromLatencyFile() {
@@ -59,7 +67,7 @@ void comp_intense(int curr_latency) {
 
     ofstream file;
     file.open("../worker_out.txt", ios::app);
-    file << timeDiff() << ", " << curr_latency << ", 1" << endl;
+    // file << timeDiff() << ", " << curr_latency << ", 1" << endl;
     ofstream trash_file;
     trash_file.open("../trash.txt", ios::app);
 
@@ -77,7 +85,7 @@ void comp_intense(int curr_latency) {
     duration<double> time_span = duration_cast<duration<double>>(end - beg);
 
     file << timeDiff() << ", " <<  curr_latency  << ", " 
-        << 1000 * time_span.count() << ", -1" << endl; // 1000 => shows millisec; 1000000 => shows microsec
+        << 1000 * time_span.count() << endl; // 1000 => shows millisec; 1000000 => shows microsec
     file.close();
 }
 
@@ -104,6 +112,25 @@ void emptyFiles() {
     trash_file << "";
     trash_file.close();
 
+    ofstream times_file;
+    times_file.open("../times.txt");
+    times_file << "";
+    times_file.close();
+
+}
+
+void printTimeTightLoop() {
+    ofstream times_file;
+    times_file.open("../times.txt");
+
+    double last_time = timeDiff();
+    
+    while(true) {
+        double curr_time = timeDiff();
+        times_file  << timeDiff() << ", " << curr_time - last_time << endl;
+        last_time = curr_time;
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+    }
 }
 
 
@@ -111,19 +138,30 @@ int main() {
 
     emptyFiles();
 
-    int start_val = 24000000; // 24 ms
+    cpu_set_t  mask;
+    CPU_ZERO(&mask);
+    CPU_SET(1, &mask);
+    if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
+        cout << "set affinity had an error" << endl;
+    }
+
+    int start_val = 15000000; // 15 ms
     int end_val = 500000; // 0.5 ms
     int decr_by = 500000; // 0.5 ms
+
+    global_start = high_resolution_clock::now();
+
+    thread t(printTimeTightLoop);
 
     for (int i = start_val; i >= end_val; i -= decr_by) {
         writeValToLatencyFile(i);
         cout << "doing val " << i << ", validated by reading: ";
         readValFromLatencyFile();
-        for (int j = 0; j < 5; j++) {
-            comp_intense(i);
-        }
+        comp_intense(i);
     }
 
     writeValToLatencyFile(start_val);
+
+    terminate();
 }
 
