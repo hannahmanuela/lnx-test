@@ -22,19 +22,12 @@
 using namespace std;
 using namespace std::chrono;
 
-// OG vals: 
-// echo 3000000 | sudo tee /sys/kernel/debug/sched/min_granularity_ns
-// echo 4000000 | sudo tee /sys/kernel/debug/sched/wakeup_granularity_ns
-
-// curr vals
-// echo 100000 | sudo tee /sys/kernel/debug/sched/min_granularity_ns
-// echo 100000 | sudo tee /sys/kernel/debug/sched/wakeup_granularity_ns
-
 high_resolution_clock::time_point global_start;
 
 #define NUM_5_MS_SLA 1
 #define NUM_50_MS_SLA 1
 #define NUM_500_MS_SLA 1
+#define TO_FACTOR_BIIG 9369535334532
 #define TO_FACTOR_500 93695353
 #define TO_FACTOR_50  9768565
 #define TO_FACTOR_5   964653
@@ -119,18 +112,22 @@ void emptyFiles() {
 
 }
 
-void printTimeTightLoop() {
-    ofstream times_file;
-    times_file.open("../times.txt");
-
-    double last_time = timeDiff();
+void tightLoop() {
+    // vector<double> factors;
     
-    while(true) {
-        double curr_time = timeDiff();
-        times_file  << timeDiff() << ", " << curr_time - last_time << endl;
-        last_time = curr_time;
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
-    }
+    // for (int i = 1; i <= TO_FACTOR_BIIG; i++) 
+    //     if (TO_FACTOR_BIIG % i == 0) 
+    //         factors.push_back(i);
+    while(true) {}
+}
+
+void tightLoopYield() {
+    // vector<double> factors;
+    
+    // for (int i = 1; i <= TO_FACTOR_BIIG; i++) 
+    //     if (TO_FACTOR_BIIG % i == 0) 
+    //         factors.push_back(i);
+    while(true) {sched_yield();}
 }
 
 
@@ -145,23 +142,57 @@ int main() {
         cout << "set affinity had an error" << endl;
     }
 
-    int start_val = 15000000; // 15 ms
-    int end_val = 500000; // 0.5 ms
-    int decr_by = 500000; // 0.5 ms
-
-    global_start = high_resolution_clock::now();
-
-    thread t(printTimeTightLoop);
-
-    for (int i = start_val; i >= end_val; i -= decr_by) {
-        writeValToLatencyFile(i);
-        cout << "doing val " << i << ", validated by reading: ";
-        readValFromLatencyFile();
-        comp_intense(i);
+    int fd_high_prio = open("/sys/fs/cgroup/high-prio/cgroup.procs", O_RDWR | O_APPEND);
+    if(fd_high_prio == -1) {
+        cout << "open failed: " << strerror(errno) << endl;
+    }
+    int fd_low_prio = open("/sys/fs/cgroup/low-prio/cgroup.procs", O_RDWR | O_APPEND);
+    if(fd_low_prio == -1) {
+        cout << "open failed: " << strerror(errno) << endl;
     }
 
-    writeValToLatencyFile(start_val);
+    int c_pid;
 
-    terminate();
+    for(int i=0; i<1; i++) {
+        int fd_to_use;
+        int prio;
+        if (i == 0) {
+            fd_to_use = fd_low_prio;
+            prio = 0;
+        } else {
+            fd_to_use = fd_high_prio;
+            prio = 1;
+        }
+
+        c_pid = fork();
+
+        if (c_pid == -1) { 
+            cout << "fork failed: " << strerror(errno) << endl;
+            perror("fork"); 
+            exit(EXIT_FAILURE); 
+        } else if (c_pid > 0) { 
+            // parent
+            cout << "parent " << getpid() << endl;
+            // write child pid to cgroup
+            string to_write = to_string(c_pid) + "\n";
+            size_t nb = write(fd_to_use, to_write.c_str(), to_write.size());
+            if (nb == -1) {
+                perror("Error writing");
+            }
+        } else {
+            // set child affinity - they will both run on cpu 0
+            cpu_set_t  mask;
+            CPU_ZERO(&mask);
+            CPU_SET(0, &mask);
+            if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
+                cout << "set affinity had an error" << endl;
+            }
+            cout << "child w/ prio " << prio << " and pid " << getpid() << " on cpu " << sched_getcpu() << endl;
+            tightLoop();
+            break;
+        } 
+    }
+
+    waitpid(c_pid, NULL, 0);
 }
 
