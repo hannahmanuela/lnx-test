@@ -24,9 +24,8 @@ using namespace std::chrono;
 
 high_resolution_clock::time_point global_start;
 
-#define NUM_5_MS_SLA 1
-#define NUM_50_MS_SLA 1
-#define NUM_500_MS_SLA 1
+#define NUM_PROCS_TO_MAKE 2
+#define NUM_LOW_PRIO 1
 #define TO_FACTOR_BIIG 9369535334532
 #define TO_FACTOR_500 93695353
 #define TO_FACTOR_50  9768565
@@ -137,26 +136,26 @@ int main() {
 
     cpu_set_t  mask;
     CPU_ZERO(&mask);
-    CPU_SET(1, &mask);
+    CPU_SET(0, &mask);
     if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
         cout << "set affinity had an error" << endl;
     }
 
-    int fd_high_prio = open("/sys/fs/cgroup/high-prio/cgroup.procs", O_RDWR | O_APPEND);
+    int fd_high_prio = open("/sys/fs/cgroup/one-digit-ms", O_RDONLY);
     if(fd_high_prio == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
-    int fd_low_prio = open("/sys/fs/cgroup/low-prio/cgroup.procs", O_RDWR | O_APPEND);
+    int fd_low_prio = open("/sys/fs/cgroup/three-digit-ms", O_RDONLY);
     if(fd_low_prio == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
 
     int c_pid;
 
-    for(int i=0; i<1; i++) {
+    for(int i=0; i<NUM_PROCS_TO_MAKE; i++) {
         int fd_to_use;
         int prio;
-        if (i == 0) {
+        if (i < NUM_LOW_PRIO) {
             fd_to_use = fd_low_prio;
             prio = 0;
         } else {
@@ -164,32 +163,35 @@ int main() {
             prio = 1;
         }
 
-        c_pid = fork();
+        struct clone_args args = {
+            .flags = CLONE_INTO_CGROUP,
+            .exit_signal = SIGCHLD,
+            .cgroup = fd_to_use,
+            };
+        c_pid = syscall(SYS_clone3, &args, sizeof(struct clone_args));
 
         if (c_pid == -1) { 
-            cout << "fork failed: " << strerror(errno) << endl;
-            perror("fork"); 
+            cout << "clone3 failed: " << strerror(errno) << endl;
+            perror("clone3"); 
             exit(EXIT_FAILURE); 
-        } else if (c_pid > 0) { 
-            // parent
-            cout << "parent " << getpid() << endl;
-            // write child pid to cgroup
-            string to_write = to_string(c_pid) + "\n";
-            size_t nb = write(fd_to_use, to_write.c_str(), to_write.size());
-            if (nb == -1) {
-                perror("Error writing");
-            }
+        } else if (c_pid > 0) {
+            continue; 
         } else {
             // set child affinity - they will both run on cpu 0
             cpu_set_t  mask;
             CPU_ZERO(&mask);
-            CPU_SET(0, &mask);
+            CPU_SET(1, &mask);
             if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
                 cout << "set affinity had an error" << endl;
             }
             cout << "child w/ prio " << prio << " and pid " << getpid() << " on cpu " << sched_getcpu() << endl;
-            tightLoop();
-            break;
+            if (prio == 0) {
+                // low priority
+                tightLoop();
+            } else {
+                tightLoopYield();
+            }
+            
         } 
     }
 
