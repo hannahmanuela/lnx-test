@@ -154,13 +154,13 @@ int main() {
 
     for(int i=0; i<NUM_PROCS_TO_MAKE; i++) {
         int fd_to_use;
-        int prio;
+        string prio;
         if (i < NUM_LOW_PRIO) {
             fd_to_use = fd_low_prio;
-            prio = 0;
+            prio = "low";
         } else {
             fd_to_use = fd_high_prio;
-            prio = 1;
+            prio = "high";
         }
 
         struct clone_args args = {
@@ -184,12 +184,12 @@ int main() {
             if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
                 cout << "set affinity had an error" << endl;
             }
-            cout << "child w/ prio " << prio << " and pid " << getpid() << " on cpu " << sched_getcpu() << endl;
-            if (prio == 0) {
+            cout << "child w/ prio " << prio << " and pid " << getpid() << endl;
+            if (prio == "low") {
                 // low priority
                 tightLoop();
             } else {
-                tightLoopYield();
+                tightLoop();
             }
             
         } 
