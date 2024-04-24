@@ -24,8 +24,9 @@ using namespace std::chrono;
 
 high_resolution_clock::time_point global_start;
 
-#define NUM_PROCS_TO_MAKE 2
+#define NUM_PROCS_TO_MAKE 3
 #define NUM_LOW_PRIO 1
+#define NUM_MIDDLE_PRIO 1
 #define TO_FACTOR_BIIG 9369535334532
 #define TO_FACTOR_500 93695353
 #define TO_FACTOR_50  9768565
@@ -111,22 +112,44 @@ void emptyFiles() {
 
 }
 
-void tightLoop() {
-    // vector<double> factors;
+int long_fac() {
     
-    // for (int i = 1; i <= TO_FACTOR_BIIG; i++) 
-    //     if (TO_FACTOR_BIIG % i == 0) 
-    //         factors.push_back(i);
-    while(true) {}
+    int to_factor = 43695353;
+    std::vector<int> factors;
+
+    for (int i = 1; i <= to_factor; i++) {
+        if (to_factor % i == 0) {
+            factors.push_back(i);
+        }
+    }
+
+    return 0;
 }
 
-void tightLoopYield() {
-    // vector<double> factors;
-    
-    // for (int i = 1; i <= TO_FACTOR_BIIG; i++) 
-    //     if (TO_FACTOR_BIIG % i == 0) 
-    //         factors.push_back(i);
-    while(true) {sched_yield();}
+int mid_fac() {
+    int to_factor = 7264565;
+    std::vector<int> factors;
+
+    for (int i = 1; i <= to_factor; i++) {
+        if (to_factor % i == 0) {
+            factors.push_back(i);
+        }
+    }
+
+    return 0;
+}
+
+int short_fac() {
+    int to_factor = 734253;
+    std::vector<int> factors;
+
+    for (int i = 1; i <= to_factor; i++) {
+        if (to_factor % i == 0) {
+            factors.push_back(i);
+        }
+    }
+
+    return 0;
 }
 
 
@@ -145,12 +168,17 @@ int main() {
     if(fd_high_prio == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
+    int fd_mid_prio = open("/sys/fs/cgroup/two-digit-ms", O_RDONLY);
+    if(fd_mid_prio == -1) {
+        cout << "open failed: " << strerror(errno) << endl;
+    }
     int fd_low_prio = open("/sys/fs/cgroup/three-digit-ms", O_RDONLY);
     if(fd_low_prio == -1) {
         cout << "open failed: " << strerror(errno) << endl;
     }
 
     int c_pid;
+    vector<int> pids;
 
     for(int i=0; i<NUM_PROCS_TO_MAKE; i++) {
         int fd_to_use;
@@ -158,6 +186,9 @@ int main() {
         if (i < NUM_LOW_PRIO) {
             fd_to_use = fd_low_prio;
             prio = "low";
+        } else if (i < NUM_LOW_PRIO + NUM_MIDDLE_PRIO) {
+            fd_to_use = fd_mid_prio;
+            prio = "middle";
         } else {
             fd_to_use = fd_high_prio;
             prio = "high";
@@ -175,6 +206,7 @@ int main() {
             perror("clone3"); 
             exit(EXIT_FAILURE); 
         } else if (c_pid > 0) {
+            pids.push_back(c_pid);
             continue; 
         } else {
             // set child affinity - they will both run on cpu 0
@@ -186,15 +218,19 @@ int main() {
             }
             cout << "child w/ prio " << prio << " and pid " << getpid() << endl;
             if (prio == "low") {
-                // low priority
-                tightLoop();
+                long_fac();
+            } else if (prio == "middle") {
+                mid_fac();
             } else {
-                tightLoop();
+                short_fac();
             }
-            
+            return 0;
         } 
     }
 
-    waitpid(c_pid, NULL, 0);
+    for (int pid : pids) {
+        waitpid(pid, NULL, 0);
+    }
+
 }
 
