@@ -77,7 +77,7 @@ int mid_fac() {
 }
 
 int short_fac() {
-    int to_factor = 734253;
+    int to_factor = 968253;
     std::vector<int> factors;
 
     for (int i = 1; i <= to_factor; i++) {
@@ -99,9 +99,9 @@ int main() {
         cout << "set affinity had an error" << endl;
     }
 
-    int rt_high_prio = 5;
-    int rt_mid_prio = 50;
-    int rt_low_prio = 100;
+    int rt_high_prio = 3;
+    int rt_mid_prio = 30;
+    int rt_low_prio = 75;
 
     int c_pid;
     vector<int> pids;
