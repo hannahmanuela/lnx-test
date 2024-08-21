@@ -45,8 +45,8 @@ struct sched_attr {
 
 high_resolution_clock::time_point global_start;
 
-#define NUM_PROCS_TO_MAKE 2
-#define NUM_LOW_PRIO 0
+#define NUM_PROCS_TO_MAKE 3
+#define NUM_LOW_PRIO 1
 #define NUM_MIDDLE_PRIO 1
 
 int time_since_start(high_resolution_clock::time_point start) {
@@ -117,6 +117,9 @@ int short_fac() {
     high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
     long long sum = 0;
     for (long long i = 0; i < 10000000; i++) {
+	if (i==5000000) {
+	   std::this_thread::sleep_for(10ms);
+	}
         sum = 3 * i + 1;
     }
 
@@ -139,9 +142,9 @@ int main() {
         cout << "set affinity had an error" << endl;
     }
 
-    int rt_high_prio = 10;
-    int rt_mid_prio = 80;
-    int rt_low_prio = 75;
+    int rt_high_prio = 50;
+    int rt_mid_prio = 150;
+    int rt_low_prio = 300;
 
     int c_pid;
     vector<int> pids;
@@ -193,7 +196,7 @@ int main() {
                 cout << "set affinity had an error" << endl;
             }
 
-            cout << "child w/ prio " << prio << " and pid " << getpid() << endl;
+            cout << "child w/ prio " << prio << " and pid " << getpid() << ", now at " << time_since_start(global_start) << endl;
 
             if (prio == "low") {
                 long_fac();
