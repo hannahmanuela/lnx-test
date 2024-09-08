@@ -47,11 +47,41 @@ high_resolution_clock::time_point global_start;
 
 #define NUM_PROCS_TO_MAKE 3
 #define NUM_LOW_PRIO 1
-#define NUM_MIDDLE_PRIO 1
+#define NUM_MIDDLE_PRIO 0
 
 int time_since_start(high_resolution_clock::time_point start) {
     std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now() - start);
     return 1000 * time_span.count();  // 1000 => shows millisec; 1000000 => shows microsec
+}
+
+ // Function to get the waiting time in milliseconds for a specific thread
+long long wait_time(pid_t pid) {
+    // Construct the path to the thread's schedstat file
+    std::ostringstream schedstat_filepath;
+    schedstat_filepath << "/proc/" << pid << "/schedstat";
+
+    // Open the schedstat file
+    std::ifstream schedstat_file(schedstat_filepath.str());
+    if (!schedstat_file.is_open()) {
+        std::cerr << "Failed to open schedstat file: " << schedstat_filepath.str() << std::endl;
+        return -1;
+    }
+
+    // Read the necessary fields from the schedstat file
+    std::string line;
+    std::getline(schedstat_file, line);
+    schedstat_file.close();
+
+    std::istringstream iss(line);
+    long long run_time_ns = 0, wait_time_ns = 0;
+    int switches = 0;
+
+    iss >> run_time_ns >> wait_time_ns >> switches;
+
+    // Convert waiting time from nanoseconds to milliseconds
+    long long wait_time_ms = wait_time_ns / 1000000;
+
+    return wait_time_ms;
 }
 
 // 330 ms
@@ -70,10 +100,14 @@ int long_fac() {
 
     long long sum = 0;
     for (long long i = 0; i < 100000000; i++) {
+        struct sched_attr attr;
+        if (i % 10000000 == 0) {
+            cout << "middle of long run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
+        }
         sum = 3 * i + 1;
     }
 
-    cout << "long run: " << time_since_start(start) << "ms" << endl;
+    cout << "long run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
 
     return sum;
 }
@@ -97,7 +131,7 @@ int mid_fac() {
         sum = 3 * i + 1;
     }
 
-    cout << "mid run: " << time_since_start(start) << "ms" << endl;
+    cout << "mid run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
 
     return sum;
 }
@@ -117,13 +151,13 @@ int short_fac() {
     high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
     long long sum = 0;
     for (long long i = 0; i < 10000000; i++) {
-	if (i==5000000) {
-	   std::this_thread::sleep_for(10ms);
-	}
+	// if (i==5000000) {
+	//  std::this_thread::sleep_for(10ms);
+	//}
         sum = 3 * i + 1;
     }
 
-    cout << "short run: " << time_since_start(start) << "ms" << endl;
+    cout << "short run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
 
     return sum;
 }
@@ -143,8 +177,8 @@ int main() {
     }
 
     int rt_high_prio = 50;
-    int rt_mid_prio = 150;
-    int rt_low_prio = 300;
+    int rt_mid_prio = 170;
+    int rt_low_prio = 400;
 
     int c_pid;
     vector<int> pids;
@@ -171,13 +205,14 @@ int main() {
             exit(EXIT_FAILURE); 
         } else if (c_pid > 0) {
             pids.push_back(c_pid);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue; 
         } else {
 
             cout << "proc w/ prio " << prio << " starting after " << time_since_start(global_start) << endl;
 
             struct sched_attr attr;
-            int ret = syscall(SYS_sched_getattr, getpid(), &attr, sizeof(attr), 0);;
+            int ret = syscall(SYS_sched_getattr, getpid(), &attr, sizeof(attr), 0);
             if (ret < 0) {
                 perror("ERROR: sched_getattr");
             }
