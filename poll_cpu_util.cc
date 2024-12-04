@@ -47,7 +47,7 @@ high_resolution_clock::time_point global_start;
 
 #define NUM_PROCS_TO_MAKE 3
 #define NUM_LOW_PRIO 1
-#define NUM_MIDDLE_PRIO 0
+#define NUM_MIDDLE_PRIO 1
 
 int time_since_start(high_resolution_clock::time_point start) {
     std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now() - start);
@@ -101,13 +101,8 @@ int long_fac() {
     long long sum = 0;
     for (long long i = 0; i < 100000000; i++) {
         struct sched_attr attr;
-        if (i % 10000000 == 0) {
-            cout << "middle of long run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
-        }
         sum = 3 * i + 1;
     }
-
-    cout << "long run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
 
     return sum;
 }
@@ -130,8 +125,6 @@ int mid_fac() {
     for (long long i = 0; i < 50000000; i++) {
         sum = 3 * i + 1;
     }
-
-    cout << "mid run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
 
     return sum;
 }
@@ -157,8 +150,6 @@ int short_fac() {
         sum = 3 * i + 1;
     }
 
-    cout << "short run: " << time_since_start(start) << "ms, w/ wait time " << wait_time(getpid()) << endl;
-
     return sum;
 }
 
@@ -176,24 +167,24 @@ int main() {
         cout << "set affinity had an error" << endl;
     }
 
-    int rt_high_prio = 50;
-    int rt_mid_prio = 170;
-    int rt_low_prio = 400;
+    int high_prio = 10;
+    int mid_prio = 5;
+    int low_prio = 1;
 
     int c_pid;
     vector<int> pids;
 
     for(int i=0; i<NUM_PROCS_TO_MAKE; i++) {
-        int rt_to_use;
+        int prio_to_use;
         string prio;
         if (i < NUM_LOW_PRIO) {
-            rt_to_use = rt_low_prio;
+            prio_to_use = low_prio;
             prio = "low";
         } else if (i < NUM_LOW_PRIO + NUM_MIDDLE_PRIO) {
-            rt_to_use = rt_mid_prio;
+            prio_to_use = mid_prio;
             prio = "middle";
         } else {
-            rt_to_use = rt_high_prio;
+            prio_to_use = high_prio;
             prio = "high";
         }
 
@@ -209,29 +200,21 @@ int main() {
             continue; 
         } else {
 
-            cout << "proc w/ prio " << prio << " starting after " << time_since_start(global_start) << endl;
+            cout << "proc " << getpid() << " w/ prio " << prio << " starting after " << time_since_start(global_start) << endl;
 
-            struct sched_attr attr;
-            int ret = syscall(SYS_sched_getattr, getpid(), &attr, sizeof(attr), 0);
-            if (ret < 0) {
-                perror("ERROR: sched_getattr");
-            }
-            attr.sched_runtime = rt_to_use * NSEC_PER_MSEC;
-            ret = syscall(SYS_sched_setattr, getpid(), &attr, 0);
-            if (ret < 0) {
-                perror("ERROR: sched_setattr");
+            struct sched_param params;
+            params.sched_priority = prio_to_use;
+            if ( sched_setscheduler(getpid(), SCHED_FIFO, &params) > 0) {
+                cout << "set affinity had an error" << endl;
             }
 
-            // cout << "set sched_runtime to be " << rt_to_use << endl;
-            // set child affinity - they will both run on cpu 0
+            // set child affinity - they will all run on cpu 1
             cpu_set_t  mask;
             CPU_ZERO(&mask);
             CPU_SET(1, &mask);
             if ( sched_setaffinity(0, sizeof(mask), &mask) > 0) {
                 cout << "set affinity had an error" << endl;
             }
-
-            cout << "child w/ prio " << prio << " and pid " << getpid() << ", now at " << time_since_start(global_start) << endl;
 
             if (prio == "low") {
                 long_fac();
@@ -241,7 +224,7 @@ int main() {
                 short_fac();
             }
 
-            cout << "proc w/ prio " << prio << " ending after " << time_since_start(global_start) << endl;
+            cout << "proc " << getpid() << " w/ prio " << prio << " ending after " << time_since_start(global_start) << ", with wait time " << wait_time(getpid()) << endl;
 
             return 0;
             } 
